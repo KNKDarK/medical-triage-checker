@@ -67,8 +67,6 @@ def signup_user(username: str, email: str, password: str) -> tuple[bool, str]:
         return True, "Account created successfully! Please log in."
     except sqlite3.IntegrityError:
         return False, "Username or email already exists."
-    finally:
-        conn.close()
 
 
 def login_user(username: str, password: str) -> tuple[bool, str]:
@@ -78,7 +76,6 @@ def login_user(username: str, password: str) -> tuple[bool, str]:
         (username.strip(), hash_password(password)),
     )
     row = cur.fetchone()
-    conn.close()
     if row:
         return True, row[1]
     return False, ""
@@ -190,7 +187,7 @@ with col_user:
     st.markdown(f"👤 **{st.session_state.username}**  \n{st.session_state.user_email}")
 with col_reset:
     if st.button("🚪 Logout", use_container_width=True):
-        for k in ["authenticated", "username", "user_email", "auth_page", "report_generated"]:
+        for k in ["authenticated", "username", "user_email", "auth_page"]:
             if k in st.session_state:
                 del st.session_state[k]
         st.rerun()
@@ -311,15 +308,14 @@ with tab_report:
                          "Head injury with confusion", "Severe allergic reaction",
                          "Suicidal thoughts", "Severe abdominal pain", "Seizure"}
         is_emergency = bool(set(emergency) & crit_symptoms) or bool(red_flags) or pain_level >= 9
-        is_emergency = is_emergency or {"Vomiting", "Diarrhea"}.issubset(set(digestive))
         is_emergency = is_emergency or ("Fainting" in general and age >= 60)
 
-        needs_doctor = (temp >= 102) or len(yellow_flags) >= 2 or duration >= 7
-        needs_doctor = needs_doctor or pain_level >= 5 or spo2 < 95
+        needs_doctor = (temp >= 102) or len(yellow_flags) >= 3 or duration >= 7
+        needs_doctor = needs_doctor or pain_level >= 5
         needs_doctor = needs_doctor or "Headache (severe)" in neuro
-        needs_doctor = needs_doctor or ("Fever (feeling hot)" in general and "None" not in preexisting)
         needs_doctor = needs_doctor or ("Signs of infection (redness, warmth)" in skin)
         needs_doctor = needs_doctor or ("Chest" in pain_loc and pain_level >= 4)
+        needs_doctor = needs_doctor or {"Vomiting", "Diarrhea"}.issubset(set(digestive))
 
         if is_emergency:
             st.error("**URGENT — EMERGENCY CARE REQUIRED**")
