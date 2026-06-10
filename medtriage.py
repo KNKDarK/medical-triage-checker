@@ -1,21 +1,157 @@
 import streamlit as st
 from datetime import datetime
+import sqlite3
+import hashlib
+import re
 
 st.set_page_config(page_title="MedTriage Pro+", page_icon="🏥", layout="centered")
 
-if "report_generated" not in st.session_state:
-    st.session_state.report_generated = False
+# ---------- DATABASE SETUP ----------
+DB_PATH = "medtriage_users.db"
+
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )"""
+    )
+    conn.commit()
+    return conn
+
+
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+def validate_email(email: str) -> bool:
+    return re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email) is not None
+
+
+def signup_user(username: str, email: str, password: str) -> tuple[bool, str]:
+    if not username.strip():
+        return False, "Username is required."
+    if not validate_email(email):
+        return False, "Invalid email format."
+    if len(password) < 6:
+        return False, "Password must be at least 6 characters."
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
+            (username.strip(), email.strip(), hash_password(password), datetime.now().isoformat()),
+        )
+        conn.commit()
+        return True, "Account created successfully! Please log in."
+    except sqlite3.IntegrityError:
+        return False, "Username or email already exists."
+    finally:
+        conn.close()
+
+
+def login_user(username: str, password: str) -> tuple[bool, str]:
+    conn = get_db()
+    cur = conn.execute(
+        "SELECT username, email FROM users WHERE username = ? AND password_hash = ?",
+        (username.strip(), hash_password(password)),
+    )
+    row = cur.fetchone()
+    conn.close()
+    if row:
+        return True, row[1]
+    return False, ""
+
+
+# ---------- SESSION STATE DEFAULTS ----------
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+if "username" not in st.session_state:
+    st.session_state.username = ""
+if "user_email" not in st.session_state:
+    st.session_state.user_email = ""
+if "auth_page" not in st.session_state:
+    st.session_state.auth_page = "login"
+
+# =====================================================================
+# AUTH SCREEN
+# =====================================================================
+if not st.session_state.authenticated:
+
+    st.title("🏥 MedTriage Pro+")
+    st.markdown("**Medical Symptom Checker & Triage Assistant**")
+    st.caption("Please sign in or create an account to continue.")
+
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        if st.button("🔑 Sign In", use_container_width=True):
+            st.session_state.auth_page = "login"
+    with col2:
+        if st.button("📝 Sign Up", use_container_width=True):
+            st.session_state.auth_page = "signup"
+
+    st.divider()
+
+    if st.session_state.auth_page == "login":
+        st.subheader("🔑 Sign In")
+        with st.form("login_form"):
+            l_user = st.text_input("Username")
+            l_pass = st.text_input("Password", type="password")
+            if st.form_submit_button("Sign In", type="primary", use_container_width=True):
+                ok, email = login_user(l_user, l_pass)
+                if ok:
+                    st.session_state.authenticated = True
+                    st.session_state.username = l_user.strip()
+                    st.session_state.user_email = email
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password.")
+
+    else:
+        st.subheader("📝 Sign Up")
+        with st.form("signup_form"):
+            s_user = st.text_input("Username")
+            s_email = st.text_input("Email")
+            s_pass = st.text_input("Password", type="password", help="At least 6 characters")
+            s_confirm = st.text_input("Confirm Password", type="password")
+            if st.form_submit_button("Create Account", type="primary", use_container_width=True):
+                if s_pass != s_confirm:
+                    st.error("Passwords do not match.")
+                else:
+                    ok, msg = signup_user(s_user, s_email, s_pass)
+                    if ok:
+                        st.success(msg)
+                        st.session_state.auth_page = "login"
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+    st.divider()
+    st.caption(
+        "⚠️ **Disclaimer:** This tool provides informational triage guidance only. "
+        "It does not diagnose or replace professional medical advice."
+    )
+    st.stop()
+
+# =====================================================================
+# MAIN APP (authenticated)
+# =====================================================================
 
 # ---------- HEADER ----------
-col_title, col_reset = st.columns([5, 1])
+col_title, col_user, col_reset = st.columns([4, 2, 1])
 with col_title:
     st.title("🏥 Enhanced Symptom Checker & Triage")
     st.caption("⚕️ Informational triage guidance only — does **not** replace professional medical advice.")
+with col_user:
+    st.markdown(f"👤 **{st.session_state.username}**  \n{st.session_state.user_email}")
 with col_reset:
-    if st.button("🔄 Clear All", use_container_width=True):
+    if st.button("🚪 Logout", use_container_width=True):
         for k in list(st.session_state.keys()):
             del st.session_state[k]
-        st.session_state.report_generated = False
         st.rerun()
 
 # ---------- SIDEBAR: PATIENT PROFILE ----------
@@ -105,10 +241,8 @@ with tab_report:
     if not has_any_symptom:
         st.info("👈 Select symptoms or rate your pain to generate a report.")
     else:
-        # ---- BUILD FLAGS ----
         red_flags, yellow_flags = [], []
 
-        # Vital-sign red flags
         if temp >= 103:    red_flags.append(f"Very high fever ({temp}°F)")
         elif temp >= 100.4: yellow_flags.append(f"Elevated temperature ({temp}°F)")
         if hr > 120 or hr < 50: red_flags.append(f"Critical heart rate ({hr} bpm)")
@@ -118,11 +252,9 @@ with tab_report:
         if sbp > 180 or sbp < 80: red_flags.append(f"Critical blood pressure ({sbp} mmHg)")
         elif sbp > 140 or sbp < 90: yellow_flags.append(f"Elevated blood pressure ({sbp} mmHg)")
 
-        # Pain flags
         if pain_level >= 8: red_flags.append(f"Severe pain ({pain_level}/10)")
         elif pain_level >= 5: yellow_flags.append(f"Significant pain ({pain_level}/10)")
 
-        # Symptom flags
         if "Fever (feeling hot)" in general and temp >= 102:
             yellow_flags.append("Fever with elevated temperature")
         if duration >= 7: yellow_flags.append(f"Symptoms persisting {duration} days")
@@ -132,7 +264,6 @@ with tab_report:
         if "Pregnancy" in preexisting and any(s in emergency for s in ["Chest pain or pressure", "Severe shortness of breath", "Severe bleeding"]):
             red_flags.append("Pregnancy with critical symptoms")
 
-        # ---- TRIAGE DECISION ----
         crit_symptoms = {"Chest pain or pressure", "Severe shortness of breath",
                          "Sudden weakness/numbness (one side)", "Difficulty speaking",
                          "Loss of consciousness", "Severe bleeding",
@@ -149,7 +280,6 @@ with tab_report:
         needs_doctor = needs_doctor or ("Signs of infection (redness, warmth)" in skin)
         needs_doctor = needs_doctor or ("Chest" in pain_loc and pain_level >= 4)
 
-        # ---- DISPLAY ----
         if is_emergency:
             st.error("🔴 **URGENT — EMERGENCY CARE REQUIRED**")
             st.markdown("---")
@@ -181,7 +311,6 @@ with tab_report:
             st.markdown("- OTC medication as appropriate for fever / pain")
             st.markdown("- Consult a doctor if symptoms persist **> 7 days** or worsen")
 
-        # ---- PRINTABLE SUMMARY ----
         st.divider()
         st.subheader("📋 Summary for Your Provider")
 
