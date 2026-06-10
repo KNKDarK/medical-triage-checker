@@ -6,12 +6,25 @@ import re
 
 st.set_page_config(page_title="MedTriage Pro+", page_icon="🏥", layout="centered")
 
+st.markdown("""
+<style>
+.emoji { font-family: 'Noto Color Emoji', 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif; }
+.circle-red { display:inline-block; width:12px; height:12px; border-radius:50%; background:#d32f2f; margin-right:4px; }
+.circle-yellow { display:inline-block; width:12px; height:12px; border-radius:50%; background:#fbc02d; margin-right:4px; }
+.circle-green { display:inline-block; width:12px; height:12px; border-radius:50%; background:#388e3c; margin-right:4px; }
+.badge-emergency { background:#d32f2f; color:#fff; padding:2px 10px; border-radius:4px; font-weight:700; font-size:0.85rem; }
+.badge-doctor { background:#fbc02d; color:#333; padding:2px 10px; border-radius:4px; font-weight:700; font-size:0.85rem; }
+.badge-home { background:#388e3c; color:#fff; padding:2px 10px; border-radius:4px; font-weight:700; font-size:0.85rem; }
+</style>
+""", unsafe_allow_html=True)
+
 # ---------- DATABASE SETUP ----------
 DB_PATH = "medtriage_users.db"
 
 
+@st.cache_resource
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.execute(
         """CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,6 +49,10 @@ def validate_email(email: str) -> bool:
 def signup_user(username: str, email: str, password: str) -> tuple[bool, str]:
     if not username.strip():
         return False, "Username is required."
+    if len(username.strip()) < 3:
+        return False, "Username must be at least 3 characters."
+    if not re.match(r"^[a-zA-Z0-9_]+$", username.strip()):
+        return False, "Username can only contain letters, numbers, and underscores."
     if not validate_email(email):
         return False, "Invalid email format."
     if len(password) < 6:
@@ -102,25 +119,48 @@ if not st.session_state.authenticated:
             l_user = st.text_input("Username")
             l_pass = st.text_input("Password", type="password")
             if st.form_submit_button("Sign In", type="primary", use_container_width=True):
-                ok, email = login_user(l_user, l_pass)
-                if ok:
-                    st.session_state.authenticated = True
-                    st.session_state.username = l_user.strip()
-                    st.session_state.user_email = email
-                    st.rerun()
+                if not l_user.strip():
+                    st.error("Please enter your username.")
+                elif not l_pass:
+                    st.error("Please enter your password.")
                 else:
-                    st.error("Invalid username or password.")
+                    ok, email = login_user(l_user, l_pass)
+                    if ok:
+                        st.session_state.authenticated = True
+                        st.session_state.username = l_user.strip()
+                        st.session_state.user_email = email
+                        st.rerun()
+                    else:
+                        st.error("Invalid username or password.")
 
     else:
         st.subheader("📝 Sign Up")
         with st.form("signup_form"):
-            s_user = st.text_input("Username")
+            s_user = st.text_input("Username", help="3–20 characters, letters and numbers only")
             s_email = st.text_input("Email")
             s_pass = st.text_input("Password", type="password", help="At least 6 characters")
             s_confirm = st.text_input("Confirm Password", type="password")
             if st.form_submit_button("Create Account", type="primary", use_container_width=True):
+                errors = []
+                if not s_user.strip():
+                    errors.append("Username is required.")
+                elif len(s_user.strip()) < 3:
+                    errors.append("Username must be at least 3 characters.")
+                elif not re.match(r"^[a-zA-Z0-9_]+$", s_user.strip()):
+                    errors.append("Username can only contain letters, numbers, and underscores.")
+                if not s_email.strip():
+                    errors.append("Email is required.")
+                elif not validate_email(s_email.strip()):
+                    errors.append("Invalid email format.")
+                if not s_pass:
+                    errors.append("Password is required.")
+                elif len(s_pass) < 6:
+                    errors.append("Password must be at least 6 characters.")
                 if s_pass != s_confirm:
-                    st.error("Passwords do not match.")
+                    errors.append("Passwords do not match.")
+                if errors:
+                    for e in errors:
+                        st.error(e)
                 else:
                     ok, msg = signup_user(s_user, s_email, s_pass)
                     if ok:
@@ -150,8 +190,9 @@ with col_user:
     st.markdown(f"👤 **{st.session_state.username}**  \n{st.session_state.user_email}")
 with col_reset:
     if st.button("🚪 Logout", use_container_width=True):
-        for k in list(st.session_state.keys()):
-            del st.session_state[k]
+        for k in ["authenticated", "username", "user_email", "auth_page", "report_generated"]:
+            if k in st.session_state:
+                del st.session_state[k]
         st.rerun()
 
 # ---------- SIDEBAR: PATIENT PROFILE ----------
@@ -220,10 +261,10 @@ with tab_sym:
 with tab_pain:
     st.subheader("Pain Assessment")
     pain_level = st.select_slider("Worst pain level (0 = none, 10 = worst imaginable)",
-                                   options=list(range(0, 11)), value=2)
+                                   options=list(range(0, 11)), value=0)
     if pain_level > 0:
-        severity = "🟢 Mild" if pain_level <= 3 else "🟡 Moderate" if pain_level <= 6 else "🔴 Severe"
-        st.markdown(f"**Severity:** {severity}")
+        severity = "<span class='circle-green'></span> Mild" if pain_level <= 3 else "<span class='circle-yellow'></span> Moderate" if pain_level <= 6 else "<span class='circle-red'></span> Severe"
+        st.markdown(f"**Severity:** {severity}", unsafe_allow_html=True)
 
     pain_loc = st.multiselect("Pain location(s)", [
         "Head", "Neck", "Chest", "Upper Back", "Lower Back", "Abdomen",
@@ -281,40 +322,43 @@ with tab_report:
         needs_doctor = needs_doctor or ("Chest" in pain_loc and pain_level >= 4)
 
         if is_emergency:
-            st.error("🔴 **URGENT — EMERGENCY CARE REQUIRED**")
+            st.error("**URGENT — EMERGENCY CARE REQUIRED**")
             st.markdown("---")
-            st.markdown("### 🚨 Immediate Actions")
+            st.markdown("### <span class='emoji'>🚨</span> Immediate Actions", unsafe_allow_html=True)
             st.markdown("- Call **911** (or local emergency services) **now**")
             st.markdown("- Do **not** wait for symptoms to improve")
             st.markdown("- Have someone drive you — do **not** drive yourself if possible")
             for f in red_flags:
-                st.markdown(f"- ⚠️ **{f}**")
+                st.markdown(f"- <span class='circle-red'></span> **{f}**", unsafe_allow_html=True)
             for s in emergency:
                 if s in crit_symptoms:
-                    st.markdown(f"- 🚩 {s}")
+                    st.markdown(f"- <span class='emoji'>🚩</span> {s}", unsafe_allow_html=True)
         elif needs_doctor:
-            st.warning("🟡 **SCHEDULE A DOCTOR VISIT**")
+            st.warning("**SCHEDULE A DOCTOR VISIT**")
             st.markdown("---")
-            st.markdown("### 📅 Recommended Next Steps")
+            st.markdown("### <span class='emoji'>📅</span> Recommended Next Steps", unsafe_allow_html=True)
             st.markdown("- Contact your **primary care physician** or visit an **Urgent Care** today")
             st.markdown("- Monitor closely — seek emergency care if symptoms worsen")
             for f in yellow_flags:
-                st.markdown(f"- ⚡ {f}")
+                st.markdown(f"- <span class='circle-yellow'></span> {f}", unsafe_allow_html=True)
             if "None" not in preexisting:
                 conds = [c for c in preexisting if c != "None"]
-                st.markdown(f"- 🩺 This may be impacted by: {', '.join(conds)}")
+                st.markdown(f"- <span class='emoji'>🩺</span> This may be impacted by: {', '.join(conds)}", unsafe_allow_html=True)
         else:
-            st.success("🟢 **HOME CARE & MONITORING**")
+            st.success("**HOME CARE & MONITORING**")
             st.markdown("---")
-            st.markdown("### 🏡 Self-Care")
+            st.markdown("### <span class='emoji'>🏡</span> Self-Care", unsafe_allow_html=True)
             st.markdown("- **Rest**, hydrate, and monitor symptoms")
             st.markdown("- OTC medication as appropriate for fever / pain")
             st.markdown("- Consult a doctor if symptoms persist **> 7 days** or worsen")
 
         st.divider()
-        st.subheader("📋 Summary for Your Provider")
 
-        triage_label = "🔴 Emergency" if is_emergency else "🟡 Needs Doctor" if needs_doctor else "🟢 Home Care"
+        triage_badge = "<span class='badge-emergency'>EMERGENCY</span>" if is_emergency else "<span class='badge-doctor'>NEEDS DOCTOR</span>" if needs_doctor else "<span class='badge-home'>HOME CARE</span>"
+        triage_label = "EMERGENCY" if is_emergency else "NEEDS DOCTOR" if needs_doctor else "HOME CARE"
+
+        st.subheader("Summary for Your Provider")
+        st.markdown(f"Triage: {triage_badge}", unsafe_allow_html=True)
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
         symptom_str = ", ".join(all_symptoms) if all_symptoms else "None reported"
         pain_loc_str = ", ".join(pain_loc) if pain_loc else "Not specified"
