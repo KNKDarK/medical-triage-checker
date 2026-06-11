@@ -14,6 +14,32 @@ st.markdown("""
 html, body, .stApp, .stApp * {
     font-family: 'Noto Color Emoji', 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
 }
+
+@keyframes pulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.03); } }
+@keyframes pulseGlow { 0%,100% { box-shadow:0 0 0 0 rgba(211,47,47,0.4); } 50% { box-shadow:0 0 0 12px rgba(211,47,47,0); } }
+@keyframes slideInUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+@keyframes shimmer { 0% { background-position:-200px 0; } 100% { background-position:200px 0; } }
+@keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+@keyframes gradientShift { 0% { background-position:0% 50%; } 50% { background-position:100% 50%; } 100% { background-position:0% 50%; } }
+@keyframes bounceIn { 0% { opacity:0; transform:scale(0.3); } 50% { transform:scale(1.05); } 70% { transform:scale(0.9); } 100% { opacity:1; transform:scale(1); } }
+
+[data-testid="stMetricValue"] { animation: slideInUp 0.4s ease-out; }
+.stAlert { animation: slideInUp 0.5s ease-out; }
+.st-emotion-cache-1v0mbdj { animation: fadeIn 0.3s ease-in; }
+
+.pulse-emergency { animation: pulse 1.5s ease-in-out infinite; }
+.pulse-glow { animation: pulseGlow 2s ease-in-out infinite; }
+.slide-in { animation: slideInUp 0.5s ease-out; }
+.bounce-in { animation: bounceIn 0.6s ease-out; }
+.shimmer { background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%); background-size: 200px 100%; animation: shimmer 1.5s infinite; }
+
+.animate-gradient {
+    background: linear-gradient(-45deg, #667eea, #764ba2, #f093fb, #4facfe);
+    background-size: 400% 400%;
+    animation: gradientShift 3s ease infinite;
+    color: white; border-radius: 8px; padding: 1rem; text-align: center;
+}
+
 .emoji { font-family: 'Noto Color Emoji', 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif; }
 .circle-red { display:inline-block; width:12px; height:12px; border-radius:50%; background:#d32f2f; margin-right:4px; }
 .circle-yellow { display:inline-block; width:12px; height:12px; border-radius:50%; background:#fbc02d; margin-right:4px; }
@@ -21,25 +47,16 @@ html, body, .stApp, .stApp * {
 .badge-emergency { background:#d32f2f; color:#fff; padding:2px 10px; border-radius:4px; font-weight:700; font-size:0.85rem; }
 .badge-doctor { background:#fbc02d; color:#333; padding:2px 10px; border-radius:4px; font-weight:700; font-size:0.85rem; }
 .badge-home { background:#388e3c; color:#fff; padding:2px 10px; border-radius:4px; font-weight:700; font-size:0.85rem; }
-.action-card {
-    padding: 1rem; border-radius: 8px; margin: 0.5rem 0;
-    border: 1px solid #e0e0e0; background: #fafafa;
-}
-.clinic-item {
-    padding: 0.75rem; border-radius: 8px; margin: 0.5rem 0;
-    border-left: 4px solid;
-    background: #ffffff;
-}
-.guest-banner {
-    padding: 1rem; border-radius: 8px; margin: 0.5rem 0;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white; text-align: center;
-}
-.locked-section {
-    padding: 2rem; border-radius: 12px; margin: 1rem 0;
-    background: #f3f0ff; border: 2px dashed #7c4dff;
-    text-align: center;
-}
+.action-card { padding:1rem; border-radius:8px; margin:0.5rem 0; border:1px solid #e0e0e0; background:#fafafa; transition: transform 0.2s, box-shadow 0.2s; }
+.action-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+.clinic-item { padding:0.75rem; border-radius:8px; margin:0.5rem 0; border-left:4px solid; background:#ffffff; }
+.locked-section { padding:2rem; border-radius:12px; margin:1rem 0; background:#f3f0ff; border:2px dashed #7c4dff; text-align:center; animation: bounceIn 0.6s ease-out; }
+.emergency-alert { animation: pulse 1.5s ease-in-out infinite; border-radius:8px; }
+.severity-bar { height:12px; border-radius:6px; transition: width 0.8s ease-in-out; }
+.tip-card { padding:0.75rem; border-radius:8px; margin:0.25rem 0; border-left:3px solid; animation: slideInUp 0.4s ease-out; }
+.body-part { display:inline-block; padding:2px 6px; margin:2px; border-radius:4px; font-size:0.85rem; }
+.body-part.active { background:#ffcdd2; color:#c62828; font-weight:600; }
+.body-part.inactive { background:#f5f5f5; color:#9e9e9e; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -55,6 +72,8 @@ if "is_guest" not in st.session_state:
     st.session_state.is_guest = False
 if "guest_uses" not in st.session_state:
     st.session_state.guest_uses = 0
+if "reports" not in st.session_state:
+    st.session_state.reports = []
 
 if not st.session_state.authenticated and not st.session_state.is_guest:
 
@@ -135,14 +154,8 @@ if not st.session_state.authenticated and not st.session_state.is_guest:
                         st.error(msg)
 
     st.caption("---")
-    st.caption(
-        "👤 **Guest:** Try the triage checker with limited uses. "
-        "Sign up to save reports and unlock unlimited access."
-    )
-    st.caption(
-        "⚠️ **Disclaimer:** This tool provides informational triage guidance only. "
-        "It does not diagnose or replace professional medical advice."
-    )
+    st.caption("👤 **Guest:** Try the triage checker with limited uses. Sign up to save reports and unlock unlimited access.")
+    st.caption("⚠️ **Disclaimer:** This tool provides informational triage guidance only. It does not diagnose or replace professional medical advice.")
     st.stop()
 
 
@@ -171,16 +184,16 @@ with col_reset:
 
 if st.session_state.is_guest:
     st.markdown(
-        f"<div class='guest-banner'><strong>🔒 Guest Mode</strong> — "
+        f"<div class='animate-gradient'><strong>🔒 Guest Mode</strong> — "
         f"{remaining}/{GUEST_LIMIT} free triage checks remaining. "
         f"<a href='#' onclick='alert(\"Sign up to unlock unlimited access, download reports, and more!\")' "
-        f"style='color:#ffd700;text-decoration:underline;'>Sign up →</a></div>",
+        f"style='color:#fff;text-decoration:underline;font-weight:700;'>Sign up →</a></div>",
         unsafe_allow_html=True,
     )
 
 with st.sidebar:
     st.header("👤 Patient Profile")
-    age = st.number_input("Age (years)", 0, 120, 30, help="Patient's age")
+    age = st.number_input("Age (years)", 0, 120, 30)
     gender = st.selectbox("Gender", ["Select", "Male", "Female", "Other"])
 
     st.subheader("🩺 Vitals")
@@ -205,8 +218,7 @@ with st.sidebar:
     location = st.text_input("City / ZIP code", placeholder="e.g. New York, NY or 10001")
     if st.button("📍 Detect My Location", use_container_width=True):
         st.info("Allow browser location access when prompted, then refresh.")
-        st.markdown(
-            """
+        st.markdown("""
             <script>
             navigator.geolocation.getCurrentPosition(function(pos) {
                 const lat = pos.coords.latitude;
@@ -215,15 +227,12 @@ with st.sidebar:
                 if (input) input.value = lat + ',' + lon;
             });
             </script>
-            """,
-            unsafe_allow_html=True,
-        )
+        """, unsafe_allow_html=True)
 
     if st.session_state.is_guest:
         st.divider()
         st.markdown("""
-        <div style="padding:1rem;background:linear-gradient(135deg,#667eea,#764ba2);
-        border-radius:8px;color:white;text-align:center;">
+        <div class='animate-gradient'>
         <strong>🚀 Upgrade for:</strong><br>
         ✓ Unlimited triage checks<br>
         ✓ Download summaries<br>
@@ -239,7 +248,7 @@ with tab_sym:
     c_left, c_right = st.columns(2)
 
     with c_left:
-        emergency = st.multiselect("🚨 **Severe / Emergency**", [
+        emergency_sym = st.multiselect("🚨 **Severe / Emergency**", [
             "Chest pain or pressure", "Severe shortness of breath", "Sudden weakness/numbness (one side)",
             "Difficulty speaking", "Loss of consciousness", "Severe bleeding",
             "Head injury with confusion", "Severe allergic reaction", "Suicidal thoughts"
@@ -285,13 +294,14 @@ with tab_pain:
         "Aching", "Sharp / Stabbing", "Burning", "Throbbing", "Cramping", "Dull", "Radiating"
     ])
 
-all_symptoms = emergency + general + respiratory + digestive + neuro + skin
+all_symptoms = emergency_sym + general + respiratory + digestive + neuro + skin
 has_any_symptom = bool(all_symptoms or pain_level > 0 or pain_loc)
 
 red_flags, yellow_flags = [], []
 is_emergency = False
 needs_doctor = False
 triage_label = "NONE"
+severity_score = 0
 
 if has_any_symptom:
     if temp >= 103:    red_flags.append(f"Very high fever ({temp}°F)")
@@ -312,7 +322,7 @@ if has_any_symptom:
     if "None" not in preexisting:
         conds = [c for c in preexisting if c != "None"]
         yellow_flags.append(f"Pre-existing: {', '.join(conds)}")
-    if "Pregnancy" in preexisting and any(s in emergency for s in ["Chest pain or pressure", "Severe shortness of breath", "Severe bleeding"]):
+    if "Pregnancy" in preexisting and any(s in emergency_sym for s in ["Chest pain or pressure", "Severe shortness of breath", "Severe bleeding"]):
         red_flags.append("Pregnancy with critical symptoms")
 
     crit_symptoms = {"Chest pain or pressure", "Severe shortness of breath",
@@ -320,7 +330,7 @@ if has_any_symptom:
                      "Loss of consciousness", "Severe bleeding",
                      "Head injury with confusion", "Severe allergic reaction",
                      "Suicidal thoughts", "Severe abdominal pain", "Seizure"}
-    is_emergency = bool(set(emergency) & crit_symptoms) or bool(red_flags) or pain_level >= 9
+    is_emergency = bool(set(emergency_sym) & crit_symptoms) or bool(red_flags) or pain_level >= 9
     is_emergency = is_emergency or ("Fainting" in general and age >= 60)
 
     needs_doctor = (temp >= 102) or len(yellow_flags) >= 3 or duration >= 7
@@ -331,6 +341,50 @@ if has_any_symptom:
     needs_doctor = needs_doctor or {"Vomiting", "Diarrhea"}.issubset(set(digestive))
 
     triage_label = "EMERGENCY" if is_emergency else "NEEDS DOCTOR" if needs_doctor else "HOME CARE"
+
+    score = 0
+    score += min(temp - 97, 15) if temp > 99 else 0
+    score += min((160 - sbp) / 3, 10) if sbp > 140 or sbp < 90 else 0
+    score += min((hr - 70) / 3, 10) if hr > 100 or hr < 60 else 0
+    score += min((100 - spo2) * 2, 10) if spo2 < 95 else 0
+    score += pain_level * 3
+    score += len(red_flags) * 8
+    score += len(yellow_flags) * 4
+    score += len(emergency_sym) * 5
+    score += min(duration, 14)
+    severity_score = min(int(score), 100)
+
+HEALTH_TIPS = {
+    "EMERGENCY": [
+        "🆘 Call 911 or your local emergency number immediately.",
+        "🚑 Do NOT drive yourself — ask someone or call an ambulance.",
+        "🧑‍⚕️ If possible, unlock your front door for responders.",
+        "📋 Have your medication list and ID ready for the hospital.",
+        "🧊 If bleeding, apply firm pressure with a clean cloth.",
+    ],
+    "NEEDS DOCTOR": [
+        "📞 Call your doctor's office first — they may have same-day openings.",
+        "🏥 Urgent care centers are usually faster than ER for non-life-threatening issues.",
+        "💧 Stay hydrated and rest while waiting for your appointment.",
+        "📝 Write down your symptoms and questions before the visit.",
+        "💊 Keep taking prescribed medications unless told otherwise.",
+    ],
+    "HOME CARE": [
+        "😴 Rest is the best medicine — give your body time to recover.",
+        "💧 Drink plenty of water and avoid caffeine/alcohol.",
+        "🌡️ Monitor your temperature twice daily.",
+        "🍵 Soup, herbal tea, and light foods are easier on digestion.",
+        "📅 If symptoms persist beyond 7 days, see a doctor.",
+    ],
+}
+
+BODY_MAP = [
+    ("🧠 Head", "Head"), ("🦴 Neck", "Neck"), ("❤️ Chest", "Chest"),
+    ("🔙 Upper Back", "Upper Back"), ("⬇️ Lower Back", "Lower Back"),
+    ("🍽️ Abdomen", "Abdomen"), ("🦴 Pelvis", "Pelvis"),
+    ("💪 Shoulder", "Shoulder"), ("🤚 Arm / Hand", "Arm / Hand"),
+    ("🦵 Leg / Foot", "Leg / Foot"), ("🦴 Joints", "Joints"),
+]
 
 with tab_report:
     if not has_any_symptom:
@@ -353,28 +407,38 @@ with tab_report:
             clear_session()
             st.rerun()
     else:
-        if st.session_state.is_guest:
+        is_new_report = st.session_state.is_guest and has_any_symptom
+        if is_new_report:
             st.session_state.guest_uses += 1
 
         triage_color = "#d32f2f" if is_emergency else "#fbc02d" if needs_doctor else "#388e3c"
 
         st.subheader("📋 Triage Assessment")
-
-        col_alert, col_metrics = st.columns([2, 1])
+        col_alert, col_score = st.columns([2, 1])
         with col_alert:
             if is_emergency:
                 st.error("### 🚨 URGENT — EMERGENCY CARE REQUIRED")
-                st.markdown("Call **911** immediately. Do not wait.")
+                st.markdown("Call **911** immediately. Do not wait.", unsafe_allow_html=True)
             elif needs_doctor:
                 st.warning("### 📅 SCHEDULE A DOCTOR VISIT")
-                st.markdown("Contact your PCP or visit Urgent Care today.")
+                st.markdown("Contact your PCP or visit Urgent Care today.", unsafe_allow_html=True)
             else:
                 st.success("### 🏡 HOME CARE & MONITORING")
-                st.markdown("Rest, hydrate, and monitor symptoms.")
-        with col_metrics:
+                st.markdown("Rest, hydrate, and monitor symptoms.", unsafe_allow_html=True)
+        with col_score:
             st.metric("Triage Level", triage_label, delta_color="off")
             st.metric("Pain Level", f"{pain_level}/10" if pain_level > 0 else "None")
             st.metric("Duration", f"{duration} day(s)")
+
+        bar_color = "#d32f2f" if severity_score >= 60 else "#fbc02d" if severity_score >= 30 else "#388e3c"
+        st.markdown(f"""
+        <div class='slide-in' style='margin:0.5rem 0;'>
+            <strong>📊 Severity Score: {severity_score}/100</strong>
+            <div style='background:#e0e0e0;border-radius:8px;height:14px;overflow:hidden;margin-top:4px;'>
+                <div class='severity-bar' style='width:{severity_score}%;background:{bar_color};height:100%;'></div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
         with st.expander("🚩 Red Flags & Warnings", expanded=bool(red_flags or yellow_flags)):
             col_r, col_y = st.columns(2)
@@ -405,7 +469,7 @@ with tab_report:
 
             with st.expander("🧾 Symptoms Detail"):
                 cats = [
-                    ("🚨 Emergency", emergency), ("🫁 Respiratory", respiratory),
+                    ("🚨 Emergency", emergency_sym), ("🫁 Respiratory", respiratory),
                     ("🍽️ Digestive", digestive), ("🌡️ General", general),
                     ("🧠 Neurological", neuro), ("🧴 Skin", skin),
                 ]
@@ -423,14 +487,53 @@ with tab_report:
             if pain_level > 0:
                 st.markdown(f"**Pain:** {pain_level}/10 ({pain_nature}) at {', '.join(pain_loc)}")
 
+            if pain_loc:
+                st.markdown("**📍 Body Map:**")
+                parts_html = "".join(
+                    f"<span class='body-part {'active' if label in pain_loc else 'inactive'}'>"
+                    f"{emoji} {label}</span>"
+                    for emoji, label in BODY_MAP[:-1]
+                )
+                st.markdown(f"<div>{parts_html}</div>", unsafe_allow_html=True)
+
+        st.divider()
+
+        col_tips, col_contacts = st.columns(2)
+        with col_tips:
+            st.subheader("💡 Health Tips")
+            tips = HEALTH_TIPS.get(triage_label, HEALTH_TIPS["HOME CARE"])
+            for tip in tips:
+                color = "#d32f2f" if is_emergency else "#fbc02d" if needs_doctor else "#388e3c"
+                st.markdown(
+                    f"<div class='tip-card' style='border-left-color:{color};background:" +
+                    ("#ffebee" if is_emergency else "#fff8e1" if needs_doctor else "#e8f5e9") +
+                    f"'>{tip}</div>",
+                    unsafe_allow_html=True,
+                )
+
+        with col_contacts:
+            st.subheader("📞 Emergency Contacts")
+            st.markdown("""
+            <div class='action-card' style='text-align:center;'>
+                <a href='tel:911' style='display:block;padding:0.5rem;background:#d32f2f;color:white;
+                border-radius:8px;text-decoration:none;font-weight:700;font-size:1.2rem;margin-bottom:0.5rem;'>
+                📞 911 — Emergency</a>
+                <a href='tel:1-800-222-1222' style='display:block;padding:0.5rem;background:#f57c00;
+                color:white;border-radius:8px;text-decoration:none;font-weight:700;margin-bottom:0.5rem;'>
+                ☠️ Poison Control</a>
+                <a href='tel:988' style='display:block;padding:0.5rem;background:#7b1fa2;
+                color:white;border-radius:8px;text-decoration:none;font-weight:700;margin-bottom:0.5rem;'>
+                🫂 Crisis Helpline (988)</a>
+            </div>
+            """, unsafe_allow_html=True)
+
         st.divider()
 
         if st.session_state.is_guest:
             st.info(f"🔒 Guest — {remaining}/{GUEST_LIMIT} checks left. Sign up to download summaries and unlock all features.")
             st.markdown(
                 "<div class='locked-section' style='padding:1rem;'>"
-                "<strong>🔒 Full summary & download</strong> — available after <a href='#' "
-                f"onclick='parent.window.location.reload();'>sign up</a></div>",
+                "<strong>🔒 Full summary & download</strong> — available after sign up</div>",
                 unsafe_allow_html=True,
             )
         else:
@@ -450,7 +553,7 @@ with tab_report:
 
     PATIENT
       Age: {age} yr  |  Gender: {gender}
-      Triage: {triage_label}
+      Triage: {triage_label}  |  Severity: {severity_score}/100
       Duration: {duration} day(s)
 
     VITALS
@@ -492,6 +595,28 @@ with tab_report:
                     use_container_width=True,
                 )
 
+            report_entry = {
+                "time": now_str, "triage": triage_label, "severity": severity_score,
+                "pain": pain_level, "symptoms": len(all_symptoms),
+            }
+            st.session_state.reports.insert(0, report_entry)
+            if len(st.session_state.reports) > 20:
+                st.session_state.reports = st.session_state.reports[:20]
+
+            if st.session_state.reports:
+                with st.expander("📜 Session History", expanded=False):
+                    for i, r in enumerate(st.session_state.reports[:10]):
+                        c = "#d32f2f" if r["triage"] == "EMERGENCY" else "#fbc02d" if r["triage"] == "NEEDS DOCTOR" else "#388e3c"
+                        st.markdown(
+                            f"<div style='padding:0.5rem;margin:0.25rem 0;border-left:3px solid {c};"
+                            f"background:#fafafa;border-radius:4px;'>"
+                            f"<strong>#{i+1}</strong> {r['time']} — "
+                            f"<span style='color:{c};font-weight:700;'>{r['triage']}</span> | "
+                            f"Score: {r['severity']}/100 | Pain: {r['pain']}/10 | {r['symptoms']} symptoms"
+                            f"</div>",
+                            unsafe_allow_html=True,
+                        )
+
         st.divider()
 
         st.subheader("⚡ Quick Actions")
@@ -499,7 +624,7 @@ with tab_report:
         with qc1:
             if is_emergency:
                 st.markdown(
-                    "<a href='tel:911' target='_blank' style='display:block;text-align:center;"
+                    "<a href='tel:911' target='_blank' class='pulse-glow' style='display:block;text-align:center;"
                     "padding:0.75rem;background:#d32f2f;color:white;border-radius:8px;"
                     "text-decoration:none;font-weight:700;font-size:1.1rem;'>📞 Call 911 Now</a>",
                     unsafe_allow_html=True,
@@ -519,7 +644,8 @@ with tab_report:
                 st.markdown(
                     f"<a href='{maps_url}' target='_blank' style='display:block;text-align:center;"
                     f"padding:0.75rem;background:{triage_color};color:white;border-radius:8px;"
-                    f"text-decoration:none;font-weight:700;'>🗺️ Find Near {location.split(',')[0]}</a>",
+                    f"text-decoration:none;font-weight:700;transition:transform 0.2s;'>"
+                    f"🗺️ Find Near {location.split(',')[0]}</a>",
                     unsafe_allow_html=True,
                 )
             else:
@@ -540,7 +666,7 @@ with tab_report:
 
 with tab_nearby:
     if st.session_state.is_guest:
-        st.markdown(f"""
+        st.markdown("""
         <div class='locked-section'>
             <h2>🔒 Guest Feature Locked</h2>
             <p>Nearby clinic finder is available after sign up.</p>
@@ -560,17 +686,15 @@ with tab_nearby:
         if is_emergency:
             st.error("### 🚨 EMERGENCY — Find Nearest ER")
             st.markdown("Call **911** first. If you can drive, here are nearby Emergency Rooms:")
-
             query = urllib.parse.quote(f"Emergency Room near {loc_clean}")
             maps_url = f"https://www.google.com/maps/search/{query}"
             st.markdown(
-                f"<a href='{maps_url}' target='_blank' style='display:inline-block;"
+                f"<a href='{maps_url}' target='_blank' class='pulse-glow' style='display:inline-block;"
                 f"padding:1rem 2rem;background:#d32f2f;color:white;border-radius:8px;"
                 f"text-decoration:none;font-weight:700;font-size:1.2rem;'>"
                 f"📍 Show Emergency Rooms near {loc_clean}</a>",
                 unsafe_allow_html=True,
             )
-
             st.markdown("""
             <div style="margin-top:1rem;padding:1rem;background:#ffebee;border-radius:8px;border-left:4px solid #d32f2f;">
             <strong>⚠️ Before you go:</strong>
@@ -585,7 +709,6 @@ with tab_nearby:
         elif needs_doctor:
             st.warning("### 📅 Find a Doctor or Urgent Care")
             st.markdown("Visit an **Urgent Care** or call your **Primary Care Physician** today.")
-
             q_urgent = urllib.parse.quote(f"Urgent Care near {loc_clean}")
             q_pcp = urllib.parse.quote(f"Primary care doctor near {loc_clean}")
             u1, u2 = st.columns(2)
@@ -605,7 +728,6 @@ with tab_nearby:
                     f"👨‍⚕️ PCP near {loc_clean.split(',')[0]}</a>",
                     unsafe_allow_html=True,
                 )
-
             st.markdown("""
             <div style="margin-top:1rem;padding:1rem;background:#fff8e1;border-radius:8px;border-left:4px solid #fbc02d;">
             <strong>💡 Tips:</strong>
@@ -620,7 +742,6 @@ with tab_nearby:
         else:
             st.success("### 🏡 Self-Care — Nearby Resources")
             st.markdown("Monitor symptoms at home. Here are useful nearby places:")
-
             q_pharm = urllib.parse.quote(f"Pharmacy near {loc_clean}")
             q_clinic = urllib.parse.quote(f"Walk-in clinic near {loc_clean}")
             u1, u2 = st.columns(2)
@@ -640,7 +761,6 @@ with tab_nearby:
                     f"🏪 Walk-in Clinic near {loc_clean.split(',')[0]}</a>",
                     unsafe_allow_html=True,
                 )
-
             st.markdown("""
             <div style="margin-top:1rem;padding:1rem;background:#e8f5e9;border-radius:8px;border-left:4px solid #388e3c;">
             <strong>✅ Self-Care Checklist:</strong>
