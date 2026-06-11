@@ -12,6 +12,9 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&amp;display=swap');
 html, body, .stApp, .stApp * {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+.emoji {
     font-family: 'Noto Color Emoji', 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
 }
 
@@ -160,7 +163,7 @@ if not st.session_state.authenticated and not st.session_state.is_guest:
 
 
 def clear_session():
-    for k in ["authenticated", "username", "user_email", "auth_page", "is_guest", "guest_uses"]:
+    for k in ["authenticated", "username", "user_email", "auth_page", "is_guest", "guest_uses", "reports"]:
         if k in st.session_state:
             del st.session_state[k]
 
@@ -379,11 +382,11 @@ HEALTH_TIPS = {
 }
 
 BODY_MAP = [
-    ("🧠 Head", "Head"), ("🦴 Neck", "Neck"), ("❤️ Chest", "Chest"),
-    ("🔙 Upper Back", "Upper Back"), ("⬇️ Lower Back", "Lower Back"),
-    ("🍽️ Abdomen", "Abdomen"), ("🦴 Pelvis", "Pelvis"),
-    ("💪 Shoulder", "Shoulder"), ("🤚 Arm / Hand", "Arm / Hand"),
-    ("🦵 Leg / Foot", "Leg / Foot"), ("🦴 Joints", "Joints"),
+    ("🧠", "Head"), ("🦴", "Neck"), ("❤️", "Chest"),
+    ("🔙", "Upper Back"), ("⬇️", "Lower Back"),
+    ("🍽️", "Abdomen"), ("🦴", "Pelvis"),
+    ("💪", "Shoulder"), ("🤚", "Arm / Hand"),
+    ("🦵", "Leg / Foot"), ("🦴", "Joints"),
 ]
 
 with tab_report:
@@ -407,9 +410,13 @@ with tab_report:
             clear_session()
             st.rerun()
     else:
-        is_new_report = st.session_state.is_guest and has_any_symptom
-        if is_new_report:
-            st.session_state.guest_uses += 1
+        if st.session_state.is_guest and has_any_symptom:
+            if not st.session_state.get("_report_counted", False):
+                st.session_state.guest_uses += 1
+                st.session_state._report_counted = True
+
+        if not has_any_symptom:
+            st.session_state._report_counted = False
 
         triage_color = "#d32f2f" if is_emergency else "#fbc02d" if needs_doctor else "#388e3c"
 
@@ -492,7 +499,7 @@ with tab_report:
                 parts_html = "".join(
                     f"<span class='body-part {'active' if label in pain_loc else 'inactive'}'>"
                     f"{emoji} {label}</span>"
-                    for emoji, label in BODY_MAP[:-1]
+                    for emoji, label in BODY_MAP
                 )
                 st.markdown(f"<div>{parts_html}</div>", unsafe_allow_html=True)
 
