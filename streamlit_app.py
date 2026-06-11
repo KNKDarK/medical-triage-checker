@@ -1,9 +1,10 @@
 import streamlit as st
 from datetime import datetime
 import re
+import urllib.parse
 from medtriage import get_db, signup_user, login_user, validate_email
 
-st.set_page_config(page_title="MedTriage Pro+", page_icon="🏥", layout="centered")
+st.set_page_config(page_title="MedTriage Pro+", page_icon="🏥", layout="wide")
 
 st.markdown("""
 <style>
@@ -18,6 +19,15 @@ html, body, .stApp, .stApp * {
 .badge-emergency { background:#d32f2f; color:#fff; padding:2px 10px; border-radius:4px; font-weight:700; font-size:0.85rem; }
 .badge-doctor { background:#fbc02d; color:#333; padding:2px 10px; border-radius:4px; font-weight:700; font-size:0.85rem; }
 .badge-home { background:#388e3c; color:#fff; padding:2px 10px; border-radius:4px; font-weight:700; font-size:0.85rem; }
+.action-card {
+    padding: 1rem; border-radius: 8px; margin: 0.5rem 0;
+    border: 1px solid #e0e0e0; background: #fafafa;
+}
+.clinic-item {
+    padding: 0.75rem; border-radius: 8px; margin: 0.5rem 0;
+    border-left: 4px solid;
+    background: #ffffff;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -145,7 +155,27 @@ with st.sidebar:
     meds = st.text_input("Current Medications", placeholder="e.g. metformin, lisinopril")
     allergies = st.text_input("Allergies", placeholder="e.g. penicillin, latex")
 
-tab_sym, tab_pain, tab_report = st.tabs(["🤒 Symptoms", "📍 Pain", "📄 Report"])
+    st.divider()
+    st.subheader("📍 Your Location")
+    location = st.text_input("City / ZIP code", placeholder="e.g. New York, NY or 10001",
+                              help="Enter your city or ZIP code to find nearby clinics")
+    if st.button("📍 Detect My Location", use_container_width=True):
+        st.info("Allow browser location access when prompted, then refresh.")
+        st.markdown(
+            """
+            <script>
+            navigator.geolocation.getCurrentPosition(function(pos) {
+                const lat = pos.coords.latitude;
+                const lon = pos.coords.longitude;
+                const input = window.parent.document.querySelector('input[aria-label="City / ZIP code"]');
+                if (input) input.value = lat + ',' + lon;
+            });
+            </script>
+            """,
+            unsafe_allow_html=True,
+        )
+
+tab_sym, tab_pain, tab_report, tab_nearby = st.tabs(["🤒 Symptoms", "📍 Pain", "📄 Report", "📍 Nearby Clinics"])
 
 with tab_sym:
     st.subheader("Select all that apply")
@@ -243,52 +273,86 @@ with tab_report:
         needs_doctor = needs_doctor or ("Chest" in pain_loc and pain_level >= 4)
         needs_doctor = needs_doctor or {"Vomiting", "Diarrhea"}.issubset(set(digestive))
 
-        if is_emergency:
-            st.error("**URGENT — EMERGENCY CARE REQUIRED**")
-            st.markdown("---")
-            st.markdown("### <span class='emoji'>🚨</span> Immediate Actions", unsafe_allow_html=True)
-            st.markdown("- Call **911** (or local emergency services) **now**")
-            st.markdown("- Do **not** wait for symptoms to improve")
-            st.markdown("- Have someone drive you — do **not** drive yourself if possible")
-            for f in red_flags:
-                st.markdown(f"- <span class='circle-red'></span> **{f}**", unsafe_allow_html=True)
-            for s in emergency:
-                if s in crit_symptoms:
-                    st.markdown(f"- <span class='emoji'>🚩</span> {s}", unsafe_allow_html=True)
-        elif needs_doctor:
-            st.warning("**SCHEDULE A DOCTOR VISIT**")
-            st.markdown("---")
-            st.markdown("### <span class='emoji'>📅</span> Recommended Next Steps", unsafe_allow_html=True)
-            st.markdown("- Contact your **primary care physician** or visit an **Urgent Care** today")
-            st.markdown("- Monitor closely — seek emergency care if symptoms worsen")
-            for f in yellow_flags:
-                st.markdown(f"- <span class='circle-yellow'></span> {f}", unsafe_allow_html=True)
-            if "None" not in preexisting:
-                conds = [c for c in preexisting if c != "None"]
-                st.markdown(f"- <span class='emoji'>🩺</span> This may be impacted by: {', '.join(conds)}", unsafe_allow_html=True)
-        else:
-            st.success("**HOME CARE & MONITORING**")
-            st.markdown("---")
-            st.markdown("### <span class='emoji'>🏡</span> Self-Care", unsafe_allow_html=True)
-            st.markdown("- **Rest**, hydrate, and monitor symptoms")
-            st.markdown("- OTC medication as appropriate for fever / pain")
-            st.markdown("- Consult a doctor if symptoms persist **> 7 days** or worsen")
+        triage_label = "EMERGENCY" if is_emergency else "NEEDS DOCTOR" if needs_doctor else "HOME CARE"
+
+        triage_color = "#d32f2f" if is_emergency else "#fbc02d" if needs_doctor else "#388e3c"
+
+        st.subheader("📋 Triage Assessment")
+
+        col_alert, col_metrics = st.columns([2, 1])
+        with col_alert:
+            if is_emergency:
+                st.error("### 🚨 URGENT — EMERGENCY CARE REQUIRED")
+                st.markdown("Call **911** immediately. Do not wait.")
+            elif needs_doctor:
+                st.warning("### 📅 SCHEDULE A DOCTOR VISIT")
+                st.markdown("Contact your PCP or visit Urgent Care today.")
+            else:
+                st.success("### 🏡 HOME CARE & MONITORING")
+                st.markdown("Rest, hydrate, and monitor symptoms.")
+        with col_metrics:
+            st.metric("Triage Level", triage_label, delta_color="off")
+            st.metric("Pain Level", f"{pain_level}/10" if pain_level > 0 else "None")
+            st.metric("Duration", f"{duration} day(s)")
+
+        with st.expander("🚩 Red Flags & Warnings", expanded=bool(red_flags or yellow_flags)):
+            col_r, col_y = st.columns(2)
+            with col_r:
+                if red_flags:
+                    for f in red_flags:
+                        st.markdown(f"- <span class='circle-red'></span> **{f}**", unsafe_allow_html=True)
+                else:
+                    st.caption("No red flags detected.")
+            with col_y:
+                if yellow_flags:
+                    for f in yellow_flags:
+                        st.markdown(f"- <span class='circle-yellow'></span> {f}", unsafe_allow_html=True)
+                else:
+                    st.caption("No yellow flags detected.")
 
         st.divider()
 
-        triage_badge = "<span class='badge-emergency'>EMERGENCY</span>" if is_emergency else "<span class='badge-doctor'>NEEDS DOCTOR</span>" if needs_doctor else "<span class='badge-home'>HOME CARE</span>"
-        triage_label = "EMERGENCY" if is_emergency else "NEEDS DOCTOR" if needs_doctor else "HOME CARE"
+        col1, col2 = st.columns(2)
 
-        st.subheader("Summary for Your Provider")
-        st.markdown(f"Triage: {triage_badge}", unsafe_allow_html=True)
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-        symptom_str = ", ".join(all_symptoms) if all_symptoms else "None reported"
-        pain_loc_str = ", ".join(pain_loc) if pain_loc else "Not specified"
-        pre_str = ", ".join(c for c in preexisting if c != "None") if "None" not in preexisting else "None reported"
-        med_str = meds if meds.strip() else "None reported"
-        allergy_str = allergies if allergies.strip() else "None reported"
+        with col1:
+            st.subheader("🩺 Vitals Overview")
+            vc1, vc2, vc3, vc4 = st.columns(4)
+            vc1.metric("Temp", f"{temp}°F")
+            vc2.metric("HR", f"{hr} bpm")
+            vc3.metric("SpO₂", f"{spo2}%")
+            vc4.metric("BP", f"{sbp} mmHg")
 
-        summary = f"""
+            with st.expander("🧾 Symptoms Detail"):
+                cats = [
+                    ("🚨 Emergency", emergency), ("🫁 Respiratory", respiratory),
+                    ("🍽️ Digestive", digestive), ("🌡️ General", general),
+                    ("🧠 Neurological", neuro), ("🧴 Skin", skin),
+                ]
+                for label, items in cats:
+                    if items:
+                        st.markdown(f"**{label}:** {', '.join(items)}")
+
+        with col2:
+            st.subheader("📋 Patient History")
+            pre_str = ", ".join(c for c in preexisting if c != "None") if "None" not in preexisting else "None"
+            st.markdown(f"**Conditions:** {pre_str}")
+            st.markdown(f"**Medications:** {meds if meds.strip() else 'None'}")
+            st.markdown(f"**Allergies:** {allergies if allergies.strip() else 'None'}")
+
+            if pain_level > 0:
+                st.markdown(f"**Pain:** {pain_level}/10 ({pain_nature}) at {', '.join(pain_loc)}")
+
+        st.divider()
+
+        with st.expander("📄 Full Summary for Your Provider", expanded=False):
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+            symptom_str = ", ".join(all_symptoms) if all_symptoms else "None reported"
+            pain_loc_str = ", ".join(pain_loc) if pain_loc else "Not specified"
+            pre_str_full = ", ".join(c for c in preexisting if c != "None") if "None" not in preexisting else "None reported"
+            med_str = meds if meds.strip() else "None reported"
+            allergy_str = allergies if allergies.strip() else "None reported"
+
+            summary = f"""
 ╔══════════════════════════════════════════════╗
 ║          MEDICAL TRIAGE SUMMARY              ║
 ║     Generated: {now_str}          ║
@@ -309,34 +373,181 @@ PAIN
   Level: {pain_level}/10  |  Location: {pain_loc_str}  |  Nature: {pain_nature}
 
 HISTORY
-  Conditions: {pre_str}
+  Conditions: {pre_str_full}
   Medications: {med_str}
   Allergies: {allergy_str}
 
 RECOMMENDATION
   {triage_label}"""
+            if is_emergency:
+                summary += "\n  Seek immediate emergency care — call 911 or go to ER."
+            elif needs_doctor:
+                summary += "\n  See a doctor or visit urgent care within 24 hours."
+            else:
+                summary += "\n  Home care with monitoring."
+
+            summary += "\n\n" + "═" * 50
+            summary += "\nDisclaimer: Informational assessment only. Not a substitute\n"
+            summary += "for professional medical advice. Consult a qualified\n"
+            summary += "healthcare provider for any health concerns."
+            summary += "\n" + "═" * 50
+
+            st.code(summary, language="")
+
+            st.download_button(
+                "📥 Download Summary (.txt)",
+                data=summary,
+                file_name=f"triage_summary_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+                mime="text/plain",
+                use_container_width=True,
+            )
+
+        st.divider()
+
+        st.subheader("⚡ Quick Actions")
+        qc1, qc2, qc3 = st.columns(3)
+        with qc1:
+            if is_emergency:
+                st.markdown(
+                    "<a href='tel:911' target='_blank' style='display:block;text-align:center;"
+                    "padding:0.75rem;background:#d32f2f;color:white;border-radius:8px;"
+                    "text-decoration:none;font-weight:700;font-size:1.1rem;'>📞 Call 911 Now</a>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.info("🚑 Emergency\nnot needed")
+        with qc2:
+            if location:
+                query = urllib.parse.quote(
+                    "Emergency Room near " + location if is_emergency else
+                    "Urgent Care near " + location if needs_doctor else
+                    "Pharmacy near " + location
+                )
+                maps_url = f"https://www.google.com/maps/search/{query}"
+                st.markdown(
+                    f"<a href='{maps_url}' target='_blank' style='display:block;text-align:center;"
+                    f"padding:0.75rem;background:{triage_color};color:white;border-radius:8px;"
+                    f"text-decoration:none;font-weight:700;'>🗺️ Find Near {location.split(',')[0]}</a>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.info("📍 Enter location\nin sidebar")
+        with qc3:
+            if needs_doctor or is_emergency:
+                st.markdown(
+                    "<div style='text-align:center;padding:0.75rem;background:#fff3e0;"
+                    "border-radius:8px;'><strong>🩺 Have someone drive you</strong></div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    "<div style='text-align:center;padding:0.75rem;background:#e8f5e9;"
+                    "border-radius:8px;'><strong>💊 OTC if needed</strong></div>",
+                    unsafe_allow_html=True,
+                )
+
+with tab_nearby:
+    if not has_any_symptom:
+        st.info("👈 Go to **Symptoms** tab first, then come back here for nearby clinics.")
+    elif not location:
+        st.warning("📍 Enter your **City / ZIP code** in the sidebar to find nearby clinics.")
+    else:
+        loc_clean = location.strip()
+
         if is_emergency:
-            summary += "\n  Seek immediate emergency care — call 911 or go to ER."
+            st.error("### 🚨 EMERGENCY — Find Nearest ER")
+            st.markdown("Call **911** first. If you can drive, here are nearby Emergency Rooms:")
+
+            query = urllib.parse.quote(f"Emergency Room near {loc_clean}")
+            maps_url = f"https://www.google.com/maps/search/{query}"
+            st.markdown(
+                f"<a href='{maps_url}' target='_blank' style='display:inline-block;"
+                f"padding:1rem 2rem;background:#d32f2f;color:white;border-radius:8px;"
+                f"text-decoration:none;font-weight:700;font-size:1.2rem;'>"
+                f"📍 Show Emergency Rooms near {loc_clean}</a>",
+                unsafe_allow_html=True,
+            )
+
+            st.markdown("""
+            <div style="margin-top:1rem;padding:1rem;background:#ffebee;border-radius:8px;border-left:4px solid #d32f2f;">
+            <strong>⚠️ Before you go:</strong>
+            <ul>
+            <li>Call 911 if you cannot drive safely</li>
+            <li>Bring your ID, insurance card, and medication list</li>
+            <li>Do not eat or drink if surgery may be needed</li>
+            </ul>
+            </div>
+            """, unsafe_allow_html=True)
+
         elif needs_doctor:
-            summary += "\n  See a doctor or visit urgent care within 24 hours."
+            st.warning("### 📅 Find a Doctor or Urgent Care")
+            st.markdown("Visit an **Urgent Care** or call your **Primary Care Physician** today.")
+
+            q_urgent = urllib.parse.quote(f"Urgent Care near {loc_clean}")
+            q_pcp = urllib.parse.quote(f"Primary care doctor near {loc_clean}")
+            u1, u2 = st.columns(2)
+            with u1:
+                st.markdown(
+                    f"<a href='https://www.google.com/maps/search/{q_urgent}' target='_blank' "
+                    f"style='display:block;text-align:center;padding:1rem;background:#fbc02d;"
+                    f"color:#333;border-radius:8px;text-decoration:none;font-weight:700;'>"
+                    f"🏥 Urgent Care near {loc_clean.split(',')[0]}</a>",
+                    unsafe_allow_html=True,
+                )
+            with u2:
+                st.markdown(
+                    f"<a href='https://www.google.com/maps/search/{q_pcp}' target='_blank' "
+                    f"style='display:block;text-align:center;padding:1rem;background:#fff3e0;"
+                    f"color:#333;border-radius:8px;text-decoration:none;font-weight:700;'>"
+                    f"👨‍⚕️ PCP near {loc_clean.split(',')[0]}</a>",
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown("""
+            <div style="margin-top:1rem;padding:1rem;background:#fff8e1;border-radius:8px;border-left:4px solid #fbc02d;">
+            <strong>💡 Tips:</strong>
+            <ul>
+            <li>Call ahead to check walk-in availability</li>
+            <li>Bring your ID, insurance card, and symptom notes</li>
+            <li>Go to ER if symptoms worsen suddenly</li>
+            </ul>
+            </div>
+            """, unsafe_allow_html=True)
+
         else:
-            summary += "\n  Home care with monitoring."
+            st.success("### 🏡 Self-Care — Nearby Resources")
+            st.markdown("Monitor symptoms at home. Here are useful nearby places:")
 
-        summary += "\n\n" + "═" * 50
-        summary += "\nDisclaimer: Informational assessment only. Not a substitute\n"
-        summary += "for professional medical advice. Consult a qualified\n"
-        summary += "healthcare provider for any health concerns."
-        summary += "\n" + "═" * 50
+            q_pharm = urllib.parse.quote(f"Pharmacy near {loc_clean}")
+            q_clinic = urllib.parse.quote(f"Walk-in clinic near {loc_clean}")
+            u1, u2 = st.columns(2)
+            with u1:
+                st.markdown(
+                    f"<a href='https://www.google.com/maps/search/{q_pharm}' target='_blank' "
+                    f"style='display:block;text-align:center;padding:1rem;background:#388e3c;"
+                    f"color:white;border-radius:8px;text-decoration:none;font-weight:700;'>"
+                    f"💊 Pharmacy near {loc_clean.split(',')[0]}</a>",
+                    unsafe_allow_html=True,
+                )
+            with u2:
+                st.markdown(
+                    f"<a href='https://www.google.com/maps/search/{q_clinic}' target='_blank' "
+                    f"style='display:block;text-align:center;padding:1rem;background:#e8f5e9;"
+                    f"color:#333;border-radius:8px;text-decoration:none;font-weight:700;'>"
+                    f"🏪 Walk-in Clinic near {loc_clean.split(',')[0]}</a>",
+                    unsafe_allow_html=True,
+                )
 
-        st.code(summary, language="")
-
-        st.download_button(
-            "📥 Download Summary (.txt)",
-            data=summary,
-            file_name=f"triage_summary_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
-            mime="text/plain",
-            use_container_width=True,
-        )
+            st.markdown("""
+            <div style="margin-top:1rem;padding:1rem;background:#e8f5e9;border-radius:8px;border-left:4px solid #388e3c;">
+            <strong>✅ Self-Care Checklist:</strong>
+            <ul>
+            <li>Rest and stay hydrated</li>
+            <li>OTC medication for fever/pain as needed</li>
+            <li>Contact a doctor if symptoms persist > 7 days</li>
+            </ul>
+            </div>
+            """, unsafe_allow_html=True)
 
 st.divider()
 st.caption(
