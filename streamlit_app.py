@@ -632,9 +632,7 @@ with tab_report:
             else:
                 st.info("🚑 Emergency\nnot needed")
         with qc2:
-            if st.session_state.is_guest:
-                st.info("🔒 Sign up to\nfind nearby")
-            elif location:
+            if location:
                 query = urllib.parse.quote(
                     "Emergency Room near " + location if is_emergency else
                     "Urgent Care near " + location if needs_doctor else
@@ -665,27 +663,19 @@ with tab_report:
                 )
 
 with tab_nearby:
-    if st.session_state.is_guest:
-        st.markdown("""
-        <div class='locked-section'>
-            <h2>🔒 Guest Feature Locked</h2>
-            <p>Nearby clinic finder is available after sign up.</p>
-            <p><strong>Sign up free</strong> to find ERs, urgent care, and pharmacies near you.</p>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button("📝 Sign Up to Unlock Nearby Clinics", type="primary", use_container_width=True):
-            clear_session()
-            st.rerun()
-    elif not has_any_symptom:
+    if not has_any_symptom:
         st.info("👈 Go to **Symptoms** tab first, then come back here for nearby clinics.")
     elif not location:
         st.warning("📍 Enter your **City / ZIP code** in the sidebar to find nearby clinics.")
     else:
         loc_clean = location.strip()
 
+        if st.session_state.is_guest:
+            st.info("🔍 **Guest:** Basic clinic locations shown. Sign up for detailed guidance & tips.")
+
         if is_emergency:
             st.error("### 🚨 EMERGENCY — Find Nearest ER")
-            st.markdown("Call **911** first. If you can drive, here are nearby Emergency Rooms:")
+            st.markdown("Call **911** first.")
             query = urllib.parse.quote(f"Emergency Room near {loc_clean}")
             maps_url = f"https://www.google.com/maps/search/{query}"
             st.markdown(
