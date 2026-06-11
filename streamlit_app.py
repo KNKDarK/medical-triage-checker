@@ -4,6 +4,8 @@ import re
 import urllib.parse
 from medtriage import get_db, signup_user, login_user, validate_email
 
+GUEST_LIMIT = 2
+
 st.set_page_config(page_title="MedTriage Pro+", page_icon="🏥", layout="wide")
 
 st.markdown("""
@@ -28,6 +30,16 @@ html, body, .stApp, .stApp * {
     border-left: 4px solid;
     background: #ffffff;
 }
+.guest-banner {
+    padding: 1rem; border-radius: 8px; margin: 0.5rem 0;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white; text-align: center;
+}
+.locked-section {
+    padding: 2rem; border-radius: 12px; margin: 1rem 0;
+    background: #f3f0ff; border: 2px dashed #7c4dff;
+    text-align: center;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -39,20 +51,29 @@ if "user_email" not in st.session_state:
     st.session_state.user_email = ""
 if "auth_page" not in st.session_state:
     st.session_state.auth_page = "login"
+if "is_guest" not in st.session_state:
+    st.session_state.is_guest = False
+if "guest_uses" not in st.session_state:
+    st.session_state.guest_uses = 0
 
-if not st.session_state.authenticated:
+if not st.session_state.authenticated and not st.session_state.is_guest:
 
     st.title("🏥 MedTriage Pro+")
     st.markdown("**Medical Symptom Checker & Triage Assistant**")
-    st.caption("Please sign in or create an account to continue.")
+    st.caption("Sign in for full access or continue as a guest.")
 
-    col1, col2 = st.columns([1, 1])
+    col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
         if st.button("🔑 Sign In", use_container_width=True):
             st.session_state.auth_page = "login"
     with col2:
         if st.button("📝 Sign Up", use_container_width=True):
             st.session_state.auth_page = "signup"
+    with col3:
+        if st.button("👤 Guest Access", use_container_width=True, type="secondary"):
+            st.session_state.is_guest = True
+            st.session_state.guest_uses = 0
+            st.rerun()
 
     st.divider()
 
@@ -113,25 +134,49 @@ if not st.session_state.authenticated:
                     else:
                         st.error(msg)
 
-    st.divider()
+    st.caption("---")
+    st.caption(
+        "👤 **Guest:** Try the triage checker with limited uses. "
+        "Sign up to save reports and unlock unlimited access."
+    )
     st.caption(
         "⚠️ **Disclaimer:** This tool provides informational triage guidance only. "
         "It does not diagnose or replace professional medical advice."
     )
     st.stop()
 
+
+def clear_session():
+    for k in ["authenticated", "username", "user_email", "auth_page", "is_guest", "guest_uses"]:
+        if k in st.session_state:
+            del st.session_state[k]
+
+
+remaining = max(0, GUEST_LIMIT - st.session_state.guest_uses) if st.session_state.is_guest else None
+
 col_title, col_user, col_reset = st.columns([4, 2, 1])
 with col_title:
     st.title("🏥 Enhanced Symptom Checker & Triage")
     st.caption("⚕️ Informational triage guidance only — does **not** replace professional medical advice.")
 with col_user:
-    st.markdown(f"👤 **{st.session_state.username}**  \n{st.session_state.user_email}")
+    if st.session_state.is_guest:
+        st.markdown(f"👤 **Guest**  \n{remaining}/{GUEST_LIMIT} free uses left")
+    else:
+        st.markdown(f"👤 **{st.session_state.username}**  \n{st.session_state.user_email}")
 with col_reset:
-    if st.button("🚪 Logout", use_container_width=True):
-        for k in ["authenticated", "username", "user_email", "auth_page"]:
-            if k in st.session_state:
-                del st.session_state[k]
+    label = "🚪 Logout" if not st.session_state.is_guest else "🚪 Exit Guest"
+    if st.button(label, use_container_width=True):
+        clear_session()
         st.rerun()
+
+if st.session_state.is_guest:
+    st.markdown(
+        f"<div class='guest-banner'><strong>🔒 Guest Mode</strong> — "
+        f"{remaining}/{GUEST_LIMIT} free triage checks remaining. "
+        f"<a href='#' onclick='alert(\"Sign up to unlock unlimited access, download reports, and more!\")' "
+        f"style='color:#ffd700;text-decoration:underline;'>Sign up →</a></div>",
+        unsafe_allow_html=True,
+    )
 
 with st.sidebar:
     st.header("👤 Patient Profile")
@@ -157,8 +202,7 @@ with st.sidebar:
 
     st.divider()
     st.subheader("📍 Your Location")
-    location = st.text_input("City / ZIP code", placeholder="e.g. New York, NY or 10001",
-                              help="Enter your city or ZIP code to find nearby clinics")
+    location = st.text_input("City / ZIP code", placeholder="e.g. New York, NY or 10001")
     if st.button("📍 Detect My Location", use_container_width=True):
         st.info("Allow browser location access when prompted, then refresh.")
         st.markdown(
@@ -174,6 +218,19 @@ with st.sidebar:
             """,
             unsafe_allow_html=True,
         )
+
+    if st.session_state.is_guest:
+        st.divider()
+        st.markdown("""
+        <div style="padding:1rem;background:linear-gradient(135deg,#667eea,#764ba2);
+        border-radius:8px;color:white;text-align:center;">
+        <strong>🚀 Upgrade for:</strong><br>
+        ✓ Unlimited triage checks<br>
+        ✓ Download summaries<br>
+        ✓ All clinic locations<br>
+        ✓ Save report history
+        </div>
+        """, unsafe_allow_html=True)
 
 tab_sym, tab_pain, tab_report, tab_nearby = st.tabs(["🤒 Symptoms", "📍 Pain", "📄 Report", "📍 Nearby Clinics"])
 
@@ -228,52 +285,76 @@ with tab_pain:
         "Aching", "Sharp / Stabbing", "Burning", "Throbbing", "Cramping", "Dull", "Radiating"
     ])
 
-with tab_report:
-    all_symptoms = emergency + general + respiratory + digestive + neuro + skin
-    has_any_symptom = bool(all_symptoms or pain_level > 0 or pain_loc)
+all_symptoms = emergency + general + respiratory + digestive + neuro + skin
+has_any_symptom = bool(all_symptoms or pain_level > 0 or pain_loc)
 
+red_flags, yellow_flags = [], []
+is_emergency = False
+needs_doctor = False
+triage_label = "NONE"
+
+if has_any_symptom:
+    if temp >= 103:    red_flags.append(f"Very high fever ({temp}°F)")
+    elif temp >= 100.4: yellow_flags.append(f"Elevated temperature ({temp}°F)")
+    if hr > 120 or hr < 50: red_flags.append(f"Critical heart rate ({hr} bpm)")
+    elif hr > 100 or hr < 60: yellow_flags.append(f"Abnormal heart rate ({hr} bpm)")
+    if spo2 < 90: red_flags.append(f"Critical oxygen level ({spo2}%)")
+    elif spo2 < 95: yellow_flags.append(f"Low oxygen saturation ({spo2}%)")
+    if sbp > 180 or sbp < 80: red_flags.append(f"Critical blood pressure ({sbp} mmHg)")
+    elif sbp > 140 or sbp < 90: yellow_flags.append(f"Elevated blood pressure ({sbp} mmHg)")
+
+    if pain_level >= 8: red_flags.append(f"Severe pain ({pain_level}/10)")
+    elif pain_level >= 5: yellow_flags.append(f"Significant pain ({pain_level}/10)")
+
+    if "Fever (feeling hot)" in general and temp >= 102:
+        yellow_flags.append("Fever with elevated temperature")
+    if duration >= 7: yellow_flags.append(f"Symptoms persisting {duration} days")
+    if "None" not in preexisting:
+        conds = [c for c in preexisting if c != "None"]
+        yellow_flags.append(f"Pre-existing: {', '.join(conds)}")
+    if "Pregnancy" in preexisting and any(s in emergency for s in ["Chest pain or pressure", "Severe shortness of breath", "Severe bleeding"]):
+        red_flags.append("Pregnancy with critical symptoms")
+
+    crit_symptoms = {"Chest pain or pressure", "Severe shortness of breath",
+                     "Sudden weakness/numbness (one side)", "Difficulty speaking",
+                     "Loss of consciousness", "Severe bleeding",
+                     "Head injury with confusion", "Severe allergic reaction",
+                     "Suicidal thoughts", "Severe abdominal pain", "Seizure"}
+    is_emergency = bool(set(emergency) & crit_symptoms) or bool(red_flags) or pain_level >= 9
+    is_emergency = is_emergency or ("Fainting" in general and age >= 60)
+
+    needs_doctor = (temp >= 102) or len(yellow_flags) >= 3 or duration >= 7
+    needs_doctor = needs_doctor or pain_level >= 5
+    needs_doctor = needs_doctor or "Headache (severe)" in neuro
+    needs_doctor = needs_doctor or ("Signs of infection (redness, warmth)" in skin)
+    needs_doctor = needs_doctor or ("Chest" in pain_loc and pain_level >= 4)
+    needs_doctor = needs_doctor or {"Vomiting", "Diarrhea"}.issubset(set(digestive))
+
+    triage_label = "EMERGENCY" if is_emergency else "NEEDS DOCTOR" if needs_doctor else "HOME CARE"
+
+with tab_report:
     if not has_any_symptom:
         st.info("👈 Select symptoms or rate your pain to generate a report.")
+    elif st.session_state.is_guest and st.session_state.guest_uses >= GUEST_LIMIT:
+        st.markdown(f"""
+        <div class='locked-section'>
+            <h2>🔒 Trial Limit Reached</h2>
+            <p style='font-size:1.1rem;'>You've used all {GUEST_LIMIT} free triage checks.</p>
+            <p>Sign up for <strong>unlimited</strong> access:</p>
+            <ul style='display:inline-block;text-align:left;'>
+                <li>✓ Unlimited triage assessments</li>
+                <li>✓ Download full summary reports</li>
+                <li>✓ Nearby clinic finder</li>
+                <li>✓ Save your history</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("📝 Sign Up Now — It's Free", type="primary", use_container_width=True):
+            clear_session()
+            st.rerun()
     else:
-        red_flags, yellow_flags = [], []
-
-        if temp >= 103:    red_flags.append(f"Very high fever ({temp}°F)")
-        elif temp >= 100.4: yellow_flags.append(f"Elevated temperature ({temp}°F)")
-        if hr > 120 or hr < 50: red_flags.append(f"Critical heart rate ({hr} bpm)")
-        elif hr > 100 or hr < 60: yellow_flags.append(f"Abnormal heart rate ({hr} bpm)")
-        if spo2 < 90: red_flags.append(f"Critical oxygen level ({spo2}%)")
-        elif spo2 < 95: yellow_flags.append(f"Low oxygen saturation ({spo2}%)")
-        if sbp > 180 or sbp < 80: red_flags.append(f"Critical blood pressure ({sbp} mmHg)")
-        elif sbp > 140 or sbp < 90: yellow_flags.append(f"Elevated blood pressure ({sbp} mmHg)")
-
-        if pain_level >= 8: red_flags.append(f"Severe pain ({pain_level}/10)")
-        elif pain_level >= 5: yellow_flags.append(f"Significant pain ({pain_level}/10)")
-
-        if "Fever (feeling hot)" in general and temp >= 102:
-            yellow_flags.append("Fever with elevated temperature")
-        if duration >= 7: yellow_flags.append(f"Symptoms persisting {duration} days")
-        if "None" not in preexisting:
-            conds = [c for c in preexisting if c != "None"]
-            yellow_flags.append(f"Pre-existing: {', '.join(conds)}")
-        if "Pregnancy" in preexisting and any(s in emergency for s in ["Chest pain or pressure", "Severe shortness of breath", "Severe bleeding"]):
-            red_flags.append("Pregnancy with critical symptoms")
-
-        crit_symptoms = {"Chest pain or pressure", "Severe shortness of breath",
-                         "Sudden weakness/numbness (one side)", "Difficulty speaking",
-                         "Loss of consciousness", "Severe bleeding",
-                         "Head injury with confusion", "Severe allergic reaction",
-                         "Suicidal thoughts", "Severe abdominal pain", "Seizure"}
-        is_emergency = bool(set(emergency) & crit_symptoms) or bool(red_flags) or pain_level >= 9
-        is_emergency = is_emergency or ("Fainting" in general and age >= 60)
-
-        needs_doctor = (temp >= 102) or len(yellow_flags) >= 3 or duration >= 7
-        needs_doctor = needs_doctor or pain_level >= 5
-        needs_doctor = needs_doctor or "Headache (severe)" in neuro
-        needs_doctor = needs_doctor or ("Signs of infection (redness, warmth)" in skin)
-        needs_doctor = needs_doctor or ("Chest" in pain_loc and pain_level >= 4)
-        needs_doctor = needs_doctor or {"Vomiting", "Diarrhea"}.issubset(set(digestive))
-
-        triage_label = "EMERGENCY" if is_emergency else "NEEDS DOCTOR" if needs_doctor else "HOME CARE"
+        if st.session_state.is_guest:
+            st.session_state.guest_uses += 1
 
         triage_color = "#d32f2f" if is_emergency else "#fbc02d" if needs_doctor else "#388e3c"
 
@@ -344,63 +425,72 @@ with tab_report:
 
         st.divider()
 
-        with st.expander("📄 Full Summary for Your Provider", expanded=False):
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-            symptom_str = ", ".join(all_symptoms) if all_symptoms else "None reported"
-            pain_loc_str = ", ".join(pain_loc) if pain_loc else "Not specified"
-            pre_str_full = ", ".join(c for c in preexisting if c != "None") if "None" not in preexisting else "None reported"
-            med_str = meds if meds.strip() else "None reported"
-            allergy_str = allergies if allergies.strip() else "None reported"
-
-            summary = f"""
-╔══════════════════════════════════════════════╗
-║          MEDICAL TRIAGE SUMMARY              ║
-║     Generated: {now_str}          ║
-╚══════════════════════════════════════════════╝
-
-PATIENT
-  Age: {age} yr  |  Gender: {gender}
-  Triage: {triage_label}
-  Duration: {duration} day(s)
-
-VITALS
-  Temp: {temp}°F  |  HR: {hr} bpm  |  SpO₂: {spo2}%  |  BP: {sbp} mmHg
-
-SYMPTOMS
-  {symptom_str}
-
-PAIN
-  Level: {pain_level}/10  |  Location: {pain_loc_str}  |  Nature: {pain_nature}
-
-HISTORY
-  Conditions: {pre_str_full}
-  Medications: {med_str}
-  Allergies: {allergy_str}
-
-RECOMMENDATION
-  {triage_label}"""
-            if is_emergency:
-                summary += "\n  Seek immediate emergency care — call 911 or go to ER."
-            elif needs_doctor:
-                summary += "\n  See a doctor or visit urgent care within 24 hours."
-            else:
-                summary += "\n  Home care with monitoring."
-
-            summary += "\n\n" + "═" * 50
-            summary += "\nDisclaimer: Informational assessment only. Not a substitute\n"
-            summary += "for professional medical advice. Consult a qualified\n"
-            summary += "healthcare provider for any health concerns."
-            summary += "\n" + "═" * 50
-
-            st.code(summary, language="")
-
-            st.download_button(
-                "📥 Download Summary (.txt)",
-                data=summary,
-                file_name=f"triage_summary_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
-                mime="text/plain",
-                use_container_width=True,
+        if st.session_state.is_guest:
+            st.info(f"🔒 Guest — {remaining}/{GUEST_LIMIT} checks left. Sign up to download summaries and unlock all features.")
+            st.markdown(
+                "<div class='locked-section' style='padding:1rem;'>"
+                "<strong>🔒 Full summary & download</strong> — available after <a href='#' "
+                f"onclick='parent.window.location.reload();'>sign up</a></div>",
+                unsafe_allow_html=True,
             )
+        else:
+            with st.expander("📄 Full Summary for Your Provider", expanded=False):
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                symptom_str = ", ".join(all_symptoms) if all_symptoms else "None reported"
+                pain_loc_str = ", ".join(pain_loc) if pain_loc else "Not specified"
+                pre_str_full = ", ".join(c for c in preexisting if c != "None") if "None" not in preexisting else "None reported"
+                med_str = meds if meds.strip() else "None reported"
+                allergy_str = allergies if allergies.strip() else "None reported"
+
+                summary = f"""
+    ╔══════════════════════════════════════════════╗
+    ║          MEDICAL TRIAGE SUMMARY              ║
+    ║     Generated: {now_str}          ║
+    ╚══════════════════════════════════════════════╝
+
+    PATIENT
+      Age: {age} yr  |  Gender: {gender}
+      Triage: {triage_label}
+      Duration: {duration} day(s)
+
+    VITALS
+      Temp: {temp}°F  |  HR: {hr} bpm  |  SpO₂: {spo2}%  |  BP: {sbp} mmHg
+
+    SYMPTOMS
+      {symptom_str}
+
+    PAIN
+      Level: {pain_level}/10  |  Location: {pain_loc_str}  |  Nature: {pain_nature}
+
+    HISTORY
+      Conditions: {pre_str_full}
+      Medications: {med_str}
+      Allergies: {allergy_str}
+
+    RECOMMENDATION
+      {triage_label}"""
+                if is_emergency:
+                    summary += "\n  Seek immediate emergency care — call 911 or go to ER."
+                elif needs_doctor:
+                    summary += "\n  See a doctor or visit urgent care within 24 hours."
+                else:
+                    summary += "\n  Home care with monitoring."
+
+                summary += "\n\n" + "═" * 50
+                summary += "\nDisclaimer: Informational assessment only. Not a substitute\n"
+                summary += "for professional medical advice. Consult a qualified\n"
+                summary += "healthcare provider for any health concerns."
+                summary += "\n" + "═" * 50
+
+                st.code(summary, language="")
+
+                st.download_button(
+                    "📥 Download Summary (.txt)",
+                    data=summary,
+                    file_name=f"triage_summary_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+                    mime="text/plain",
+                    use_container_width=True,
+                )
 
         st.divider()
 
@@ -417,7 +507,9 @@ RECOMMENDATION
             else:
                 st.info("🚑 Emergency\nnot needed")
         with qc2:
-            if location:
+            if st.session_state.is_guest:
+                st.info("🔒 Sign up to\nfind nearby")
+            elif location:
                 query = urllib.parse.quote(
                     "Emergency Room near " + location if is_emergency else
                     "Urgent Care near " + location if needs_doctor else
@@ -447,7 +539,18 @@ RECOMMENDATION
                 )
 
 with tab_nearby:
-    if not has_any_symptom:
+    if st.session_state.is_guest:
+        st.markdown(f"""
+        <div class='locked-section'>
+            <h2>🔒 Guest Feature Locked</h2>
+            <p>Nearby clinic finder is available after sign up.</p>
+            <p><strong>Sign up free</strong> to find ERs, urgent care, and pharmacies near you.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("📝 Sign Up to Unlock Nearby Clinics", type="primary", use_container_width=True):
+            clear_session()
+            st.rerun()
+    elif not has_any_symptom:
         st.info("👈 Go to **Symptoms** tab first, then come back here for nearby clinics.")
     elif not location:
         st.warning("📍 Enter your **City / ZIP code** in the sidebar to find nearby clinics.")
