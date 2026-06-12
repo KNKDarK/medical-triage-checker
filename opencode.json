@@ -1,0 +1,21 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "skills": {
+    "Clinical-Symptom-Checker-AI": {
+      "location": ".opencode/skills/Clinical-Symptom-Checker-AI",
+      "description": "Safe, validated conversational AI for patient complaints"
+    },
+    "Clinical-Workflow-&-Governance-AI": {
+      "location": ".opencode/skills/Clinical-Workflow-&-Governance-AI",
+      "description": "Clinical workflow and governance AI"
+    },
+    "Medical-Conversational-AI": {
+      "location": ".opencode/skills/Medical-Conversational-AI",
+      "description": "Medical conversational AI for patient interactions"
+    },
+    "Remote-Biomarker-Integration-AI": {
+      "location": ".opencode/skills/Remote-Biomarker-Integration-AI",
+      "description": "Remote biomarker integration and analysis AI"
+    }
+  }
+}

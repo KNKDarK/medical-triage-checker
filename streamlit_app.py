@@ -2,7 +2,11 @@ import streamlit as st
 from datetime import datetime
 import re
 import urllib.parse
+import json
 from medtriage import get_db, signup_user, login_user, validate_email
+from medical_entity_extractor import extract_medical_entities
+from clinical_risk_assessment import assess_clinical_risk
+from clinical_triage_router import route_patient
 
 GUEST_LIMIT = 2
 
@@ -244,7 +248,7 @@ with st.sidebar:
         </div>
         """, unsafe_allow_html=True)
 
-tab_sym, tab_pain, tab_report, tab_nearby = st.tabs(["🤒 Symptoms", "📍 Pain", "📄 Report", "📍 Nearby Clinics"])
+tab_sym, tab_pain, tab_report, tab_extract, tab_risk, tab_triage, tab_nearby = st.tabs(["🤒 Symptoms", "📍 Pain", "📄 Report", "🔍 Extract", "⚠️ Risk", "🏥 Triage", "📍 Nearby Clinics"])
 
 with tab_sym:
     st.subheader("Select all that apply")
@@ -669,7 +673,350 @@ with tab_report:
                     unsafe_allow_html=True,
                 )
 
-with tab_nearby:
+with tab_extract:
+    st.subheader("🔍 Extract Medical Entities from Text")
+    st.caption("Analyze raw narrative text and extract structured medical information. Extracts ONLY explicitly stated information—no interpretation or diagnosis.")
+    
+    st.divider()
+    
+    narrative_input = st.text_area(
+        "Paste patient narrative here:",
+        placeholder="Example: I'm a 35-year-old woman with a severe headache for 3 days. Started after a stressful work day. Pain is worse when looking at screens, better with rest. Also have nausea.",
+        height=150,
+        label_visibility="collapsed"
+    )
+    
+    if st.button("Extract Entities", type="primary", use_container_width=True):
+        if not narrative_input.strip():
+            st.error("Please enter a narrative to extract entities from.")
+        else:
+            with st.spinner("Extracting medical entities..."):
+                extracted = extract_medical_entities(narrative_input)
+            
+            st.success("Extraction complete!")
+            
+            # Display in structured format
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("Demographics")
+                st.markdown(f"**Age:** {extracted['age'] if extracted['age'] else 'Not stated'}")
+                st.markdown(f"**Sex:** {extracted['sex'].capitalize() if extracted['sex'] else 'Not stated'}")
+            
+            with col2:
+                st.subheader("Chief Complaint")
+                st.markdown(f"_{extracted['chief_complaint']}_" if extracted['chief_complaint'] else "_No complaint extracted_")
+            
+            st.divider()
+            
+            col_sym, col_timeline = st.columns(2)
+            
+            with col_sym:
+                st.subheader("Symptoms Found")
+                if extracted['symptoms_found']:
+                    for symptom in extracted['symptoms_found']:
+                        st.markdown(f"- {symptom}")
+                else:
+                    st.caption("No symptoms extracted")
+            
+            with col_timeline:
+                st.subheader("Timeline/Onset")
+                if extracted['timeline_onset']:
+                    st.markdown(f"_{extracted['timeline_onset']}_")
+                else:
+                    st.caption("No timeline information extracted")
+            
+            st.divider()
+            
+            st.subheader("Aggravating / Alleviating Factors")
+            if extracted['aggravating_or_alleviating_factors']:
+                for factor in extracted['aggravating_or_alleviating_factors']:
+                    st.markdown(f"- {factor}")
+            else:
+                st.caption("No aggravating or alleviating factors extracted")
+            
+            st.divider()
+            
+            # Display raw JSON
+            with st.expander("📋 Raw JSON Output"):
+                st.code(json.dumps(extracted, indent=2), language="json")
+            
+            # Download option
+            json_str = json.dumps(extracted, indent=2)
+            st.download_button(
+                "📥 Download as JSON",
+                data=json_str,
+                file_name=f"medical_entities_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+    
+    st.divider()
+    st.info(
+        "**How it works:** This tool extracts entities like age, sex, symptoms, timeline, and factors directly from "
+        "the narrative text. It does NOT interpret, diagnose, or assign severity. It only extracts what is explicitly stated."
+    )
+
+with tab_risk:
+    st.subheader("⚠️ Clinical Risk Assessment")
+    st.caption("Analyzes extracted medical information to identify red flags, data gaps, and worst-case scenarios that need to be excluded.")
+    
+    st.divider()
+    
+    # Option 1: Use narrative input
+    st.markdown("**Option 1: From Narrative Text**")
+    narrative_for_risk = st.text_area(
+        "Paste patient narrative here:",
+        placeholder="Example: I'm a 55-year-old man with crushing chest pain for 30 minutes, radiating to my left arm. Also shortness of breath.",
+        height=120,
+        label_visibility="collapsed",
+        key="risk_narrative"
+    )
+    
+    # Option 2: Input extracted entities directly
+    st.markdown("**Option 2: From Extracted Entities (JSON)**")
+    entities_json_input = st.text_area(
+        "Or paste extracted entities as JSON:",
+        placeholder='{"age": 55, "sex": "male", "chief_complaint": "Chest pain", "symptoms_found": ["chest pain", "shortness of breath"], "timeline_onset": "30 minutes", "aggravating_or_alleviating_factors": []}',
+        height=100,
+        label_visibility="collapsed",
+        key="entities_json"
+    )
+    
+    st.markdown("**Optional: Vital Signs**")
+    col_v1, col_v2, col_v3, col_v4 = st.columns(4)
+    with col_v1:
+        temp_risk = st.number_input("Temperature (°F)", 90.0, 110.0, 98.6, 0.1, key="temp_risk")
+    with col_v2:
+        hr_risk = st.number_input("Heart Rate (bpm)", 20, 250, 75, 1, key="hr_risk")
+    with col_v3:
+        spo2_risk = st.number_input("SpO₂ (%)", 50, 100, 98, 1, key="spo2_risk")
+    with col_v4:
+        sbp_risk = st.number_input("Systolic BP (mmHg)", 60, 260, 120, 1, key="sbp_risk")
+    
+    if st.button("Assess Clinical Risk", type="primary", use_container_width=True):
+        try:
+            # Get entities
+            if entities_json_input.strip():
+                try:
+                    extracted_ents = json.loads(entities_json_input)
+                except json.JSONDecodeError:
+                    st.error("Invalid JSON format for entities.")
+                    st.stop()
+            elif narrative_for_risk.strip():
+                with st.spinner("Extracting entities from narrative..."):
+                    extracted_ents = extract_medical_entities(narrative_for_risk)
+            else:
+                st.error("Please provide either a narrative or extracted entities.")
+                st.stop()
+            
+            # Prepare vitals
+            vitals_dict = {
+                "temperature": temp_risk,
+                "heart_rate": hr_risk,
+                "spo2": spo2_risk,
+                "blood_pressure": f"{sbp_risk}/{int(sbp_risk * 0.6)}"  # Simple diastolic estimate
+            }
+            
+            # Assess risk
+            with st.spinner("Assessing clinical risk..."):
+                risk_assessment = assess_clinical_risk(extracted_ents, vitals_dict)
+            
+            st.success("Risk assessment complete!")
+            
+            # Display results
+            col_flags, col_gaps = st.columns(2)
+            
+            with col_flags:
+                st.subheader("🚩 Red Flags Identified")
+                if risk_assessment['red_flags_present']:
+                    for i, flag in enumerate(risk_assessment['red_flags_present'], 1):
+                        st.markdown(f"**{i}.** {flag}")
+                else:
+                    st.info("No red flags identified.")
+            
+            with col_gaps:
+                st.subheader("📋 Critical Data Gaps")
+                if risk_assessment['critical_missing_data_points']:
+                    for i, gap in enumerate(risk_assessment['critical_missing_data_points'][:5], 1):
+                        st.markdown(f"**{i}.** {gap}")
+                    if len(risk_assessment['critical_missing_data_points']) > 5:
+                        st.caption(f"... and {len(risk_assessment['critical_missing_data_points']) - 5} more")
+                else:
+                    st.info("No critical data gaps identified.")
+            
+            st.divider()
+            
+            st.subheader("⚠️ Worst-Case Scenarios to Exclude")
+            if risk_assessment['worst_case_scenarios_to_exclude']:
+                cols = st.columns(2)
+                for i, scenario in enumerate(risk_assessment['worst_case_scenarios_to_exclude']):
+                    with cols[i % 2]:
+                        st.markdown(f"- {scenario}")
+            else:
+                st.info("No critical scenarios identified for this presentation.")
+            
+            st.divider()
+            
+            # Display raw JSON
+            with st.expander("📋 Raw JSON Output"):
+                st.code(json.dumps(risk_assessment, indent=2), language="json")
+            
+            # Download option
+            json_str = json.dumps(risk_assessment, indent=2)
+            st.download_button(
+                "📥 Download as JSON",
+                data=json_str,
+                file_name=f"clinical_risk_assessment_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+        
+        except Exception as e:
+            st.error(f"Error during assessment: {str(e)}")
+    
+    st.divider()
+    st.info(
+        "**How it works:** This tool analyzes extracted medical information to identify:\n"
+        "• **Red Flags**: Critical findings suggesting serious conditions\n"
+        "• **Data Gaps**: Missing clinical information needed for full evaluation\n"
+        "• **Scenarios**: Worst-case diagnoses that should be considered and excluded"
+    )
+
+with tab_triage:
+    st.subheader("🏥 Conservative Clinical Triage Router")
+    st.caption("Routes patients to appropriate care tiers based on clinical information and risk assessment. Uses 'when in doubt, route up' philosophy.")
+    
+    st.divider()
+    
+    st.markdown("**Step 1: Patient Information**")
+    narrative_for_triage = st.text_area(
+        "Paste patient narrative here:",
+        placeholder="Example: 55-year-old male with crushing chest pain for 30 minutes, sweating, shortness of breath.",
+        height=120,
+        label_visibility="collapsed",
+        key="triage_narrative"
+    )
+    
+    st.markdown("**Step 2: Optional Vital Signs**")
+    col_t1, col_t2, col_t3, col_t4 = st.columns(4)
+    with col_t1:
+        temp_triage = st.number_input("Temperature (°F)", 90.0, 110.0, 98.6, 0.1, key="temp_triage")
+    with col_t2:
+        hr_triage = st.number_input("Heart Rate (bpm)", 20, 250, 75, 1, key="hr_triage")
+    with col_t3:
+        spo2_triage = st.number_input("SpO₂ (%)", 50, 100, 98, 1, key="spo2_triage")
+    with col_t4:
+        sbp_triage = st.number_input("Systolic BP (mmHg)", 60, 260, 120, 1, key="sbp_triage")
+    
+    if st.button("Route Patient to Care Tier", type="primary", use_container_width=True):
+        try:
+            if not narrative_for_triage.strip():
+                st.error("Please provide patient narrative.")
+                st.stop()
+            
+            # Step 1: Extract entities
+            with st.spinner("Step 1: Extracting medical entities..."):
+                extracted_ents = extract_medical_entities(narrative_for_triage)
+            
+            # Step 2: Assess risk
+            vitals_dict_triage = {
+                "temperature": temp_triage,
+                "heart_rate": hr_triage,
+                "spo2": spo2_triage,
+                "blood_pressure": f"{sbp_triage}/{int(sbp_triage * 0.6)}"
+            }
+            with st.spinner("Step 2: Assessing clinical risk..."):
+                risk_assessment = assess_clinical_risk(extracted_ents, vitals_dict_triage)
+            
+            # Step 3: Route patient
+            with st.spinner("Step 3: Routing to appropriate care tier..."):
+                triage_decision = route_patient(extracted_ents, risk_assessment, vitals_dict_triage)
+            
+            st.success("Triage routing complete!")
+            
+            # Display care tier with appropriate styling
+            tier = triage_decision['care_tier']
+            tier_color = {
+                'EMERGENCY': '#d32f2f',
+                'URGENT': '#fbc02d',
+                'NON-URGENT': '#2196f3',
+                'HOME-CARE': '#388e3c'
+            }.get(tier, '#999')
+            
+            tier_emoji = {
+                'EMERGENCY': '🚨',
+                'URGENT': '⚠️',
+                'NON-URGENT': 'ℹ️',
+                'HOME-CARE': '✅'
+            }.get(tier, '•')
+            
+            st.markdown(f"""
+            <div style='padding: 1.5rem; border-radius: 8px; background-color: {tier_color}20; border-left: 4px solid {tier_color}; margin: 1rem 0;'>
+                <h3 style='color: {tier_color}; margin-top: 0;'>{tier_emoji} {tier}</h3>
+                <p style='margin: 0.5rem 0; font-size: 1.1rem;'><strong>{triage_decision['clinical_justification']}</strong></p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.divider()
+            
+            col_actions, col_msg = st.columns(2)
+            
+            with col_actions:
+                st.subheader("🎯 Immediate Actions")
+                for i, action in enumerate(triage_decision['immediate_actions'], 1):
+                    st.markdown(f"**{i}.** {action}")
+            
+            with col_msg:
+                st.subheader("💬 Patient Message")
+                st.info(f"_{triage_decision['patient_facing_message']}_")
+            
+            st.divider()
+            
+            # Show the workflow
+            with st.expander("📊 Triage Workflow Details"):
+                workflow_col1, workflow_col2, workflow_col3 = st.columns(3)
+                
+                with workflow_col1:
+                    st.markdown("**Step 1: Extraction**")
+                    st.markdown(f"- Age: {extracted_ents.get('age', 'Unknown')}")
+                    st.markdown(f"- Sex: {extracted_ents.get('sex', 'Unknown').capitalize() if extracted_ents.get('sex') else 'Unknown'}")
+                    st.markdown(f"- Chief: {extracted_ents.get('chief_complaint', 'Unknown')[:40]}...")
+                
+                with workflow_col2:
+                    st.markdown("**Step 2: Risk Assessment**")
+                    st.markdown(f"- Red Flags: {len(risk_assessment['red_flags_present'])}")
+                    for flag in risk_assessment['red_flags_present'][:2]:
+                        st.markdown(f"  • {flag[:50]}...")
+                
+                with workflow_col3:
+                    st.markdown("**Step 3: Routing**")
+                    st.markdown(f"- **Care Tier: {tier}**")
+                    st.markdown(f"- Philosophy: Conservative")
+                    st.markdown(f"- Status: Routed")
+            
+            # Download decision
+            decision_json = json.dumps(triage_decision, indent=2)
+            st.download_button(
+                "📥 Download Triage Decision",
+                data=decision_json,
+                file_name=f"triage_decision_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+        
+        except Exception as e:
+            st.error(f"Error during triage routing: {str(e)}")
+    
+    st.divider()
+    st.info(
+        "**Care Tiers:**\n"
+        "• 🚨 **EMERGENCY**: Life-threatening → Call 911 / Go to ER NOW\n"
+        "• ⚠️ **URGENT**: Serious symptoms → Visit ER/Urgent Care TODAY\n"
+        "• ℹ️ **NON-URGENT**: Minor issues → Schedule routine visit\n"
+        "• ✅ **HOME-CARE**: Stable/minor → Manage at home with monitoring\n\n"
+        "**Philosophy**: 'When in doubt, route UP' — Conservative approach prioritizes patient safety."
+    )
     if not has_any_symptom:
         st.info("👈 Go to **Symptoms** tab first, then come back here for nearby clinics.")
     elif not location:
